@@ -15,12 +15,12 @@ sub new {
     my $config = shift;
     my $self = $class->SUPER::new(@_);
     $self->config($config);
-    $self->db;
+    $self->dbh;
     $self;
 }
 
 my $dbh;
-sub db {
+sub dbh {
     my $self = shift;
     my $data_source = sprintf("dbi:%s:dbname=%s;host=%s;port=%d",
                            $self->config->{DBDriv},
@@ -46,14 +46,14 @@ sub getstationid {
     my $stationid ;
     my $DBQuery =  "SELECT count(*) FROM foltia_station WHERE stationname = '$item{ChName}'";
 
-    my $sth = $self->db->prepare($DBQuery);
+    my $sth = $self->dbh->prepare($DBQuery);
 	$sth->execute();
     my @stationcount = $sth->fetchrow_array;
 
     if ($stationcount[0] == 1){
        #チャンネルID取得
         $DBQuery =  "SELECT stationid,stationname FROM foltia_station WHERE stationname = '$item{ChName}'";
-        $sth = $self->db->prepare($DBQuery);
+        $sth = $self->dbh->prepare($DBQuery);
         $sth->execute();
         @stationinfo= $sth->fetchrow_array;
         #局ID
@@ -64,7 +64,7 @@ sub getstationid {
     elsif($stationcount[0] == 0){
     #新規登録
         $DBQuery =  "SELECT max(stationid) FROM foltia_station";
-        $sth = $self->db->prepare($DBQuery);
+        $sth = $self->dbh->prepare($DBQuery);
         $sth->execute();
         @stationinfo= $sth->fetchrow_array;
         my $stationid = $stationinfo[0] ;
@@ -73,7 +73,7 @@ sub getstationid {
         #新規局追加時は非受信局をデフォルトに
         $DBQuery =  "insert into  foltia_station  (stationid , stationname ,stationrecch )  values ('$stationid'  ,'$item{ChName}','-10')";
 
-        $sth = $self->db->prepare($DBQuery);
+        $sth = $self->dbh->prepare($DBQuery);
         $sth->execute();
         #print "Add station;$DBQuery\n";
         writelog("foltialib Add station;$DBQuery");
@@ -99,7 +99,7 @@ sub addatq {
         $DBQuery =  "SELECT count(*) FROM  foltia_tvrecord WHERE tid = '$tid' AND stationid  = '$station' ";
     }
 
-    my $sth = $self->db->prepare($DBQuery);
+    my $sth = $self->dbh->prepare($DBQuery);
 	$sth->execute();
     @titlecount = $sth->fetchrow_array;
     #件数数える
@@ -143,7 +143,7 @@ sub addcue{
         $DBQuery =  "SELECT * FROM  foltia_tvrecord WHERE tid = '$tid' AND stationid  = '$station' ";
     }
 
-    my $sth = $self->db->prepare($DBQuery);
+    my $sth = $self->dbh->prepare($DBQuery);
     $sth->execute();
 
     my @titlecount= $sth->fetchrow_array;
@@ -164,13 +164,13 @@ SELECT * from foltia_subtitle WHERE tid = '$tid'  AND startdatetime >  '$now'  A
 SELECT * from foltia_subtitle WHERE tid = '$tid' AND stationid  = '$station'  AND startdatetime >  '$now'  AND startdatetime < '$twodaysafter' ";
         #stationIDからrecch
         my $getrecchquery = "SELECT stationid , stationrecch  FROM foltia_station where stationid  = '$station' ";
-        my $stationh = $self->db->prepare($getrecchquery);
+        my $stationh = $self->dbh->prepare($getrecchquery);
         $stationh->execute();
         my @stationl =  $stationh->fetchrow_array;
         my $recch = $stationl[1];
     }
 
-    $sth = $self->db->prepare($DBQuery);
+    $sth = $self->dbh->prepare($DBQuery);
 	$sth->execute();
  
     while (($pid ,
@@ -215,6 +215,96 @@ SELECT * from foltia_subtitle WHERE tid = '$tid' AND stationid  = '$station'  AN
 
 
 }#endsub
+
+
+sub addpidatq {
+    my $self = shift;
+    my $pid = shift;
+
+    #DB検索(PID)
+    $DBQuery =  "SELECT count(*) FROM  foltia_subtitle WHERE pid = '$pid' ";
+    my $sth = $self->dbh->prepare($DBQuery);
+	$sth->execute();
+    my @titlecount= $sth->fetchrow_array;
+ 
+    if ($titlecount[0]  == 1 ) {
+        $DBQuery =  "SELECT bitrate FROM  foltia_tvrecord , foltia_subtitle  WHERE foltia_tvrecord.tid = foltia_subtitle.tid AND pid='$pid' ";
+        $sth = $self->dbh->prepare($DBQuery);
+        $sth->execute();
+        @titlecount= $sth->fetchrow_array;
+        $bitrate = $titlecount[0];#ビットレート取得
+
+        #PID抽出
+        $now = Foltia::Util::epoch2foldate(`date +%s`);
+
+        $DBQuery =  "SELECT stationrecch FROM foltia_station,foltia_subtitle WHERE foltia_subtitle.pid = '$pid'  AND  foltia_subtitle.stationid =  foltia_station.stationid ";
+
+
+        #stationIDからrecch
+        $stationh = $self->dbh->prepare($DBQuery);
+        $stationh->execute();
+        @stationl =  $stationh->fetchrow_array;
+        $recch = $stationl[0];
+
+        $DBQuery =  "SELECT  * FROM  foltia_subtitle WHERE pid='$pid' ";
+        $sth = $self->dbh->prepare($DBQuery);
+        $sth->execute();
+        ($pid ,
+         $tid ,
+         $stationid ,
+         $countno,
+         $subtitle,
+         $startdatetime,
+         $enddatetime,
+         $startoffset ,
+         $lengthmin,
+         $atid ) = $sth->fetchrow_array();
+         # print "$pid ,$tid ,$stationid ,$countno,$subtitle,$startdatetime,$enddatetime,$startoffset ,$lengthmin,$atid \n";
+
+        if($now< $startdatetime){#放送が未来の日付なら
+            #もし新開始時刻が15分移譲先なら再キュー
+            $startafter = &calclength($now,$startdatetime);
+            writelog("addpidatq DEBUG \$startafter $startafter \$now $now \$startdatetime $startdatetime");
+
+            if ($startafter > 14 ){
+                #キュー削除
+                Schedule::At::remove ( TAG => "$pid"."_X");
+                writelog("addpidatq remove que $pid");
+
+                #キュー入れ
+                #プロセス起動時刻は番組開始時刻の-5分
+                $atdateparam = Foltia::Util::calcatqparam(300);
+                Schedule::At::add (TIME => "$atdateparam", COMMAND => "$toolpath/perl/folprep.pl $pid" , TAG => "$pid"."_X");
+                writelog("addpidatq TIME $atdateparam   COMMAND $toolpath/perl/folprep.pl $pid ");
+            }
+            else {
+                $atdateparam = Foltia::Util::calcatqparam(60);
+                $reclength = $lengthmin * 60;
+
+                #キュー削除
+                Schedule::At::remove ( TAG => "$pid"."_R");
+                writelog("addpidatq remove que $pid");
+
+                if ($countno eq "") {
+                    $countno = "0";
+                }
+
+                Schedule::At::add (TIME => "$atdateparam", COMMAND => "$toolpath/perl/recwrap.pl $recch $reclength  $bitrate $tid $countno $pid" , TAG => "$pid"."_R");
+                writelog("addpidatq TIME $atdateparam   COMMAND $toolpath/perl/recwrap.pl $recch $reclength  $bitrate $tid $countno $pid");
+
+            }#end #もし新開始時刻が15分移譲先なら再キュー
+        }
+        else {
+            writelog("addpidatq drop:expire  $pid  $startafter  $now  $startdatetime");
+        }#放送が未来の日付なら
+
+    }
+    else {
+        warn "error record TID=$tid SID=$station $titlecount[0] match:$DBQuery\n";
+        writelog("addpidatq error record TID=$tid SID=$station $titlecount[0] match:$DBQuery");
+
+    }#end if ($titlecount[0]  == 1 ){
+}
 
 
 1;
