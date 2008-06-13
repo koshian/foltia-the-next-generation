@@ -1,5 +1,40 @@
 package Foltia::Video;
 
+use strict;
+use warnings;
+use base qw(Class::Accessor::Fast);
+use DBI;
+use DBD::Pg;
+use Schedule::At;
+use Time::Local;
+
+__PACKAGE__->mk_accessors(qw/config/);
+
+sub new {
+    my $class = shift;
+    my $config = shift;
+    my $self = $class->SUPER::new(@_);
+    $self->config($config);
+    $self->db;
+    $self;
+}
+
+my $dbh;
+sub db {
+    my $self = shift;
+    my $data_source = sprintf("dbi:%s:dbname=%s;host=%s;port=%d",
+                           $self->config->{DBDriv},
+                           $self->config->{DBName},
+                           $self->config->{DBHost},
+                           $self->config->{DBPort},
+        );
+    $dbh =| DBI->connect($data_source,
+                         $self->config->{DBUser},
+                         $self->config->{DBPass},
+        );
+    $dbh;
+}
+
 sub writelog {
     Foltia::Util::writelog(@_);
 }
@@ -11,14 +46,14 @@ sub getstationid {
     my $stationid ;
     my $DBQuery =  "SELECT count(*) FROM foltia_station WHERE stationname = '$item{ChName}'";
 
-    my $sth = $dbh->prepare($DBQuery);
+    my $sth = $self->db->prepare($DBQuery);
 	$sth->execute();
     my @stationcount = $sth->fetchrow_array;
 
     if ($stationcount[0] == 1){
        #チャンネルID取得
         $DBQuery =  "SELECT stationid,stationname FROM foltia_station WHERE stationname = '$item{ChName}'";
-        $sth = $dbh->prepare($DBQuery);
+        $sth = $self->db->prepare($DBQuery);
         $sth->execute();
         @stationinfo= $sth->fetchrow_array;
         #局ID
@@ -29,7 +64,7 @@ sub getstationid {
     elsif($stationcount[0] == 0){
     #新規登録
         $DBQuery =  "SELECT max(stationid) FROM foltia_station";
-        $sth = $dbh->prepare($DBQuery);
+        $sth = $self->db->prepare($DBQuery);
         $sth->execute();
         @stationinfo= $sth->fetchrow_array;
         my $stationid = $stationinfo[0] ;
@@ -38,7 +73,7 @@ sub getstationid {
         #新規局追加時は非受信局をデフォルトに
         $DBQuery =  "insert into  foltia_station  (stationid , stationname ,stationrecch )  values ('$stationid'  ,'$item{ChName}','-10')";
 
-        $sth = $dbh->prepare($DBQuery);
+        $sth = $self->db->prepare($DBQuery);
         $sth->execute();
         #print "Add station;$DBQuery\n";
         writelog("foltialib Add station;$DBQuery");
@@ -52,5 +87,134 @@ sub getstationid {
 
     return $stationid ;
 }
+
+sub addatq {
+    my ($self, $tid, $station) = @_;
+
+    #DB検索(TIDとStationIDからPIDへ)
+    if ($station == 0) {
+        $DBQuery =  "SELECT count(*) FROM  foltia_tvrecord WHERE tid = '$tid'  ";
+    }
+    else {
+        $DBQuery =  "SELECT count(*) FROM  foltia_tvrecord WHERE tid = '$tid' AND stationid  = '$station' ";
+    }
+
+    my $sth = $self->db->prepare($DBQuery);
+	$sth->execute();
+    @titlecount = $sth->fetchrow_array;
+    #件数数える
+
+    #2以上だったら
+    if ($titlecount[0]  >= 2) {
+	#全曲取りが含まれているか調べる
+        $DBQuery =  "SELECT count(*) FROM  foltia_tvrecord WHERE tid = '$tid'  AND  stationid  ='0' ";
+        my $sth = $dbh->prepare($DBQuery);
+        $sth->execute();
+        @reservecounts = $sth->fetchrow_array;
+
+        if($reservecounts[0] >= 1 ){#含まれていたら
+            if($tid == 0){
+                #今回の引き数がSID 0だったら
+                #全局取りだけ予約
+                # &writelog("addatq  DEBUG; ALL STATION RESERVE. TID=$tid SID=$station $titlecount[0] match:$DBQuery");
+                $self->addcue;
+            }
+            else {
+                #ほかの全局録画addatqが予約入れてくれるからなにもしない
+                # &writelog("addatq  DEBUG; SKIP OPERSTION. TID=$tid SID=$station $titlecount[0] match:$DBQuery");
+                exit;
+            }#end if ふくまれていたら
+        }#endif 2つ以上	
+    }
+    elsif($titlecount[0]  == 1) {
+		$self->addcue;
+    }
+    else {
+        writelog("addatq  error; reserve impossible . TID=$tid SID=$station $titlecount[0] match:$DBQuery");
+    }
+}
+
+sub addcue{
+    my $self = shift;
+    if ($station == 0) {
+        $DBQuery =  "SELECT * FROM  foltia_tvrecord WHERE tid = '$tid'  ";
+    }
+    else {
+        $DBQuery =  "SELECT * FROM  foltia_tvrecord WHERE tid = '$tid' AND stationid  = '$station' ";
+    }
+
+    my $sth = $self->db->prepare($DBQuery);
+    $sth->execute();
+
+    my @titlecount= $sth->fetchrow_array;
+    my $bitrate = $titlecount[2];#ビットレート取得
+
+    #PID抽出
+    my $now = &epoch2foldate(`date +%s`);
+    my $twodaysafter = &epoch2foldate(`date +%s` + (60 * 60 * 24 * 2));
+    #キュー入れは直近2日後まで
+
+    if ($station == 0 ){
+        $DBQuery =  "
+SELECT * from foltia_subtitle WHERE tid = '$tid'  AND startdatetime >  '$now'  AND startdatetime < '$twodaysafter' ";
+
+    }
+    else {
+        $DBQuery =  "
+SELECT * from foltia_subtitle WHERE tid = '$tid' AND stationid  = '$station'  AND startdatetime >  '$now'  AND startdatetime < '$twodaysafter' ";
+        #stationIDからrecch
+        my $getrecchquery = "SELECT stationid , stationrecch  FROM foltia_station where stationid  = '$station' ";
+        my $stationh = $self->db->prepare($getrecchquery);
+        $stationh->execute();
+        my @stationl =  $stationh->fetchrow_array;
+        my $recch = $stationl[1];
+    }
+
+    $sth = $self->db->prepare($DBQuery);
+	$sth->execute();
+ 
+    while (($pid ,
+            $tid ,
+            $stationid ,
+            $countno,
+            $subtitle,
+            $startdatetime,
+            $enddatetime,
+            $startoffset ,
+            $lengthmin,
+            $atid )
+           = $sth->fetchrow_array()) {
+
+        if ($station == 0 ){
+            #stationIDからrecch
+            $getrecchquery="SELECT stationid , stationrecch  FROM foltia_station where stationid  = '$stationid' ";
+            $stationh = $dbh->prepare($getrecchquery);
+            $stationh->execute();
+            @stationl =  $stationh->fetchrow_array;
+            $recch = $stationl[1];
+        }
+        #キュー入れ
+        #プロセス起動時刻は番組開始時刻の-1分
+        $atdateparam = Foltia::Utils::calcatqparam(300);
+        $reclength = $lengthmin * 60;
+        #&writelog("TIME $atdateparam COMMAND $toolpath/perl/tvrecording.pl $recch $reclength 0 0 $bitrate $tid $countno");
+        #キュー削除
+        Schedule::At::remove ( TAG => "$pid"."_X");
+        writelog("addatq remove $pid");
+        if ( $ARGV[2] eq "DELETE"){
+            writelog("addatq remove  only $pid");
+        }
+        else {
+            Schedule::At::add (TIME => "$atdateparam", COMMAND => "$toolpath/perl/folprep.pl $pid" , TAG => "$pid"."_X");
+            writelog("addatq TIME $atdateparam   COMMAND $toolpath/perl/folprep.pl $pid ");
+        }
+##processcheckdate 
+#&writelog("addatq TIME $atdateparam COMMAND $toolpath/perl/schedulecheck.pl");
+    }#while
+
+
+
+}#endsub
+
 
 1;

@@ -19,13 +19,14 @@ use version; our $VERSION = qv('0.0.3');
 
 # Module implementation here
 
-__PACKAGE__->mk_accessors(qw/config log/);
+__PACKAGE__->mk_accessors(qw/config log db/);
 
 sub new {
     my $class = shift;
     my $self = $class->SUPER::new(@_);
     $self->config(Foltia::ConfigLoader->setup);
     $self->log(Foltia::Util::log);
+    $self->video(Foltia::Video->new($self->config);
     $self;
 }
 
