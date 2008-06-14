@@ -11,99 +11,61 @@
 # DCC-JPL Japan/foltia project
 #
 
-$path = $0;
-$path =~ s/captureimagemaker.pl$//i;
-if ($pwd  ne "./"){
-push( @INC, "$path");
+use strict;
+use warnings;
+use Carp;
+use Getopt::Long;
+use Foltia;
+
+GetOptions('-f=s' => \my $filename);
+my ($tid, $countno, $date, $time)
+    = Foltia::Util::capture_image_filename_parse($filename);
+
+#引き数なし出実行されたら、終了
+$tid or die "Usage: captureimagemaker.pl  MPEG2filename\n";
+
+if ($tid < 0) {
+    my $msg = "captureimagemaker TID invalid";
+    Foltia::Util::writelog($msg);
+    die $msg, "\n";
 }
 
-require "foltialib.pl";
-
-#$tid = $ARGV[0] ;
-$filename = $ARGV[0] ;
-
-# filenameの妥当性をチェック
-@filenametmp = split(/\./,$filename);
-@filename = split(/-/,$filenametmp[0]);
-$tid = $filename[0];
-
-# tidが数字のみかチェック
-$tid =~ s/[^0-9]//ig;
-#print "$tid\n";
-
-if ($tid eq "" ){
-	#引き数なし出実行されたら、終了
-	print "usage captureimagemaker.pl  MPEG2filename\n";
-	exit;
-}
-
-if ($tid >= 0){
-#	print "TID is valid\n";
-}else{
-	&writelog("captureimagemaker TID invalid");
-	exit;
-}
-
-
-$countno = $filename[1];
-$countno =~ s/[^0-9]//ig;
-#if ($countno eq "" ){
-#$countno = "x";
-#}
-#	print "CNTNO:$countno\n";
-
-$date = $filename[2];
-$date =~ s/[^0-9]//ig;
-if ($date eq "" ){
-	$date =  `date  +%Y%m%d`
-}
-#	print "DATE:$date\n";
-
-
-$time = $filename[3];
-$time = substr($time, 0, 4);
-$time =~ s/[^0-9]//ig;
-if ($time eq "" ){
-	$time =  `date  +%H%M`
-}
-#	print "TIME:$time\n";
+my $f = new Foltia;
 
 #　録画ファイルがアルかチェック
-if (-e "$recfolderpath/$filename"){
-#	print "EXIST $recfolderpath/$filename\n";
-}else{
-#	print "NO $recfolderpath/$filename\n";
-	&writelog("captureimagemaker notexist $recfolderpath/$filename");
-
-	exit;
+my $file = srpintf('%s/%s', $f->config->{recfolderpath}, $filename);
+if (! -e $file){
+    my $msg = "captureimagemaker notexist $file";
+	Foltia::Util::writelog($msg);
+    die $msg;
 }
 
 # 展開先ディレクトリがあるか確認
 
-$capimgdirname = "$tid.localized/";
-$capimgdirname = $recfolderpath."/".$capimgdirname;
+my $capimgdirname = $f->config->{recfolderpath} . "/" . "$tid.localized/";
 #なければ作る
-unless (-e $capimgdirname ){
+if (! -e $capimgdirname ){
+    #FIXME!
 	system("$toolpath/perl/mklocalizeddir.pl $tid");
-	&writelog("captureimagemaker mkdir $capimgdirname");
+	Foltia::Util::writelog("captureimagemaker mkdir $capimgdirname");
 }
-$capimgdirname = "$tid.localized/img";
-$capimgdirname = $recfolderpath."/".$capimgdirname;
+
+$capimgdirname .= '/img';
 #なければ作る
-unless (-e $capimgdirname ){
-	mkdir $capimgdirname ,0777;
-	&writelog("captureimagemaker mkdir $capimgdirname");
+if (! -e $capimgdirname ){
+	mkdir $capimgdirname, 0777;
+	Foltia::Util::writelog("captureimagemaker mkdir $capimgdirname");
 }
 
 
 # キャプチャ入れるディレクトリ作成 
 # $captureimgdir = "$tid"."-"."$countno"."-"."$date"."-"."$time";
-$captureimgdir = $filename;
+my $captureimgdir = $filename;
 $captureimgdir =~ s/\.m2p$//; 
 
-unless (-e "$capimgdirname/$captureimgdir"){
+if (! -e "$capimgdirname/$captureimgdir"){
 	mkdir "$capimgdirname/$captureimgdir" ,0777;
-	&writelog("captureimagemaker mkdir $capimgdirname/$captureimgdir");
+	Foltia::Util::writelog("captureimagemaker mkdir $capimgdirname/$captureimgdir");
 
 }
 

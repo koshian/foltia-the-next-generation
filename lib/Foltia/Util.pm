@@ -47,23 +47,18 @@ sub foldate2epoch{
     my ($eyear, $emon, $emday, $q_start_time_hour, $q_start_time_min)
         = unpack 'A4 A2 A2 A2 A2', $foltiadate;
     $emon--;
-    $epoch;
+    my $epoch = timelocal(0, $q_start_time_min, $q_start_time_hour, 
+                          $emday, $emon, $eyear);
+    return $epoch;
 }
-
 
 sub epoch2foldate{
     my ($s, $mi, $h, $d, $mo, $y, $w) = localtime($_[0]);
     $mo++; $y += 1900;
 
-    my $foltiadate;
-    $mo = sprintf("%02d",$mo);
-    $d = sprintf("%02d",$d);
+    my $foltiadate = sprintf("%04d%02d%02d%02d%02d", $y, $mo, $d, $h, $mi);
 
-    $h = sprintf("%02d",$h);
-    $mi = sprintf("%02d",$mi);
-    $foltiadate = "$y$mo$d$h$mi";
-
-    $foltiadate;
+    return $foltiadate;
 }
 
 sub calclength {
@@ -71,17 +66,9 @@ sub calclength {
     #戻り値:分数
     my ($sttime, $edtime) = @_;
     my $length = -1;
-    $sttime = &foldate2epoch($sttime);
-    $edtime = &foldate2epoch($edtime);
+    $length = abs( foldate2epoch($edtime) - foldate2epoch($sttime) );
 
-    if ($edtime >= $sttime)
-        $length = $edtime - $sttime;
-    }
-    else {
-        $length = $sttime - $edtime;
-    }
-
-    return  $length / 60;
+    return $length / 60;
 }
 
 sub calcoffsetdate {
@@ -176,5 +163,27 @@ sub getphpstyleconfig {
 
     return ($configline);
 }#end sub getphpstyleconfig
+
+sub capture_image_filename_parse {
+    # filenameの妥当性をチェック
+    my $filename = shift;
+    my @filenametmp = split(/\./,$filename);
+    my ($tid, $countno, $date, $time) = split(/-/,$filenametmp[0]);
+
+    # tidが数字のみかチェック
+    #print "$tid\n";
+    $tid =~ s/[^0-9]//ig;
+    $countno =~ s/[^0-9]//ig;
+    $date =~ s/[^0-9]//ig;
+
+    $date = $date ? $date : `date  +%Y%m%d`;
+    # print "DATE:$date\n";
+
+    $time = substr($time, 0, 4);
+    $time =~ s/[^0-9]//ig;
+    $time = $time ? $time : `date  +%H%M`;
+
+    return ($tid, $countno, $date, $time);
+}
 
 1;
