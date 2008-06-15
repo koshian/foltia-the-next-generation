@@ -22,14 +22,21 @@ our @EXPORT = qw(
                 getphpstyleconfig
                 );
 
+#XXX fixme for strict!
+my $startdatetime;
+my $phptoolpath;
+my $toolpath;
+#
 my $__log;
 sub log {
-    $__log =| new Foltia::Logger;
+    if (ref($__log) ne 'Foltia::Logger') {
+        $__log = new Foltia::Logger;
+    }
     return $__log;
 }
 
 sub writelog {
-    log->write(@_);
+    __PACKAGE__->log->write(@_);
 }
 #end writelog
 
@@ -122,7 +129,7 @@ sub processfind{
 
 
 sub filenameinjectioncheck {
-    my ($self, $filename) = @_;
+    my $filename = shift;
     $filename =~ s/\///gi;
     $filename =~ s/\;//gi;
     $filename =~ s/\&//gi;
@@ -162,6 +169,29 @@ sub getphpstyleconfig {
 
     return $configline;
 }#end sub getphpstyleconfig
+
+sub capture_image_filename_parse {
+    use POSIX;
+    # filenameの妥当性をチェック
+    my $filename = shift;
+    my @filenametmp = split(/\./,$filename);
+    my ($tid, $countno, $date, $time) = split(/-/,$filenametmp[0]);
+
+    # tidが数字のみかチェック
+    #print "$tid\n";
+    $tid =~ s/[^0-9]//ig;
+    $countno =~ s/[^0-9]//ig;
+    $date =~ s/[^0-9]//ig;
+
+    $date = $date ? $date : POSIX::strftime("%Y%m%d", localtime);
+    # print "DATE:$date\n";
+
+    $time = unpack('A4', $time);
+    $time =~ s/[^0-9]//ig;
+    $time = $time ? $time : POSIX::strftime("%H%M", localtime);
+
+    return ($tid, $countno, $date, $time);
+}
 
 1;
 __END__
