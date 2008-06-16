@@ -14,35 +14,22 @@
 # DCC-JPL Japan/foltia project
 #
 #
-use DBI;
-use DBD::Pg;
-use Schedule::At;
-use Time::Local;
+use strict;
+use warnings;
+use Carp;
+use Getopt::Long;
+use Foltia;
 
 
-$path = $0;
-$path =~ s/folprep.pl$//i;
-if ($pwd  ne "./"){
-push( @INC, "$path");
-}
-
-require "foltialib.pl";
-
-#XMLゲット & DB更新
-system("$toolpath/perl/getxml2db.pl");
-
-#引き数がアルか?
-$pid = $ARGV[0] ;
-if ($pid eq "" ){
-	#引き数なし出実行されたら、終了
-	print "usage;folprep.pl <PID>\n";
-	exit;
-}
+GetOptions('-p=s' => \my $pid)
+#引き数なし出実行されたら、終了
+$pid or die "Usage: folprep.pl <PID>\n";
 
 #PID探し
-$pid = $ARGV[0];
 
 #キュー再投入
-	&writelog("folprep  $toolpath/perl/addpidatq.pl $pid");
-system("$toolpath/perl/addpidatq.pl $pid");
+Foltia::Util::writelog("folprep addpidatq $pid");
+my $f = new Foltia;
+$f->db->addpidatq($pid);
+
 

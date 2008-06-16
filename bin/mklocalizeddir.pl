@@ -10,61 +10,17 @@
 # DCC-JPL Japan/foltia project
 #
 #
+use strict;
+use warnings;
+use Carp;
+use Getopt::Long;
+use Foltia;
 
 
-use Jcode;
-use DBI;
-use DBD::Pg;
+GetOptions('-t=s' => \my $tid)
 
+#引き数がアルか?	#引き数なし出実行されたら、終了
+$tid or die "Usage: mklocalizeddir.pl [TID]\n";
 
-$path = $0;
-$path =~ s/mklocalizeddir.pl$//i;
-if ($pwd  ne "./"){
-push( @INC, "$path");
-}
-require "foltialib.pl";
-
-#引き数がアルか?
-$tid =  $ARGV[0] ;
-if ($tid eq "" ){
-	#引き数なし出実行されたら、終了
-	print "usage mklocalizeddir.pl [TID]\n";
-	exit;
-}
-
-
-#そのディレクトリがなければ
-if (-e "$recfolderpath/$tid.localized"){
-
-}else{
-
-
-#.localized用文字列取得
-
-#接続
-	my $data_source = sprintf("dbi:%s:dbname=%s;host=%s;port=%d",
-		$DBDriv,$DBName,$DBHost,$DBPort);
-	 $dbh = DBI->connect($data_source,$DBUser,$DBPass) ||die $DBI::error;;
-
-#検索
-$DBQuery =  "select title from foltia_program where tid=$tid ";
-	 $sth = $dbh->prepare($DBQuery);
-	$sth->execute();
- @subticount= $sth->fetchrow_array;
-$title = $subticount[0] ;
-$titleeuc = $title ;
- Jcode::convert(\$title , 'utf8', 'euc', "z");
-
-
-	mkdir ("$recfolderpath/$tid.localized",0755);
-	mkdir ("$recfolderpath/$tid.localized/.localized",0755);
-	mkdir ("$recfolderpath/$tid.localized/mp4",0755);
-	mkdir ("$recfolderpath/$tid.localized/m2p",0755);
-	open (JASTRING,">$recfolderpath/$tid.localized/.localized/ja.strings")  || die "Cannot write ja.strings.\n";
-	print JASTRING "\"$tid\"=\"$title\";\n";
-	close(JASTRING);
-
-&writelog("mklocalizeddir $tid $titleeuc");
-
-}#unless 引き数がアルか?
-
+my $f = new Foltia;
+$f->video->mklocalizeddir($tid);

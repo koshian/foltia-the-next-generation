@@ -7,6 +7,8 @@ use DBI;
 use DBD::Pg;
 use Schedule::At;
 use Time::Local;
+use Encode;
+use Encode::Guess qw/utf8 euc-jp shiftjis 7bit-jis/;
 
 __PACKAGE__->mk_accessors(qw/config/);
 
@@ -306,5 +308,66 @@ sub addpidatq {
     }#end if ($titlecount[0]  == 1 ){
 }
 
+
+sub deletemovie {
+    my ($self, $file) = @_;
+    #ファイル名正当性チェック
+    if (! $file =~ /.m2p\z/){
+    #	print "deletemovie invalid filetype.\n";
+        my $msg = "deletemovie invalid filetype: $file.";
+        writelog($msg);
+        warn $msg;
+        return 0;
+    }
+
+    #ファイル存在チェック
+    my $filepath = $self->config->recfolderpath . $file;
+    if (-e $filepath) {
+    # print "deletemovie file not found.$recfolderpath/$fname\n";
+        my $msg = "deletemovie file not found: $file.";
+        writelog($msg);
+        warn $msg;
+        return 0;
+    }
+
+    #既読削除処理
+    if ($self->config->rapidfiledelete > 0){ #./mita/へ移動
+        my $trashpath = $self->config->trashpath;
+        system ("mv $filepath $trashpath");
+        writelog("deletemovie mv $filepath $trashpath.");
+    }else{ #即時削除
+        system ("rm $filepath");
+        writelog("deletemovie rm $filepath ");
+    }
+}
+
+sub mklocalizeddir {
+    my ($self, $tid) = @_;
+
+    #そのディレクトリがなければ
+    my $dirname = $self->config->recfolderpath . $tid . '.localized';
+    return 0 if (-e $dirname);
+
+    #.localized用文字列取得
+
+    #検索
+    my $DBQuery =  "select title from foltia_program where tid=$tid ";
+    my $sth = $self->dbh->prepare($DBQuery);
+	$sth->execute();
+    my @subticount= $sth->fetchrow_array;
+    my $title = $subticount[0];
+
+	mkdir ("$dirname",0755);
+	mkdir ("$dirname/.localized",0755);
+	mkdir ("$dirname/mp4",0755);
+	mkdir ("$dirname/m2p",0755);
+	open (JASTRING,">$dirname/.localized/ja.strings")  || die "Cannot write ja.strings.\n";
+	print JASTRING "\"$tid\"=\"$title\";\n";
+	close(JASTRING);
+
+    my $utf8title = decode("Guess", $title);
+    #writelog("mklocalizeddir $tid " . encode('utf8', $utf8title));
+    writelog("mklocalizeddir $tid " . encode('euc-jp', $utf8title));
+}
 
 1;
